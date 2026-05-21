@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import multer from 'multer'
 import fs from 'fs/promises'
-import path from 'path'
+import * as path from 'path'
 import { fileURLToPath } from 'url'
 import { v4 as uuid } from 'uuid'
 import { pool, query, queryOne } from '../lib/db.js'
