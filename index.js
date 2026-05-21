@@ -113,6 +113,7 @@ app.use('/api/messages',      messagesRouter)
 app.use('/api/forms',         formsRouter)
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }))
+app.get('/health',     (_req, res) => res.json({ status: 'ok' }))
 
 // Global error handler
 app.use((err, _req, res, _next) => {
