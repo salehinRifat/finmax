@@ -13,6 +13,11 @@ const router = Router()
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOAD_ROOT = path.resolve(__dirname, '..', process.env.UPLOAD_DIR || 'uploads')
 
+// Ensure upload root exists without using top-level await.
+(async () => {
+  try { await fs.mkdir(UPLOAD_ROOT, { recursive: true }) } catch (err) { /* ignore */ }
+})()
+
 const ALLOWED_MIMETYPES = new Set([
   'application/pdf',
   'image/jpeg',

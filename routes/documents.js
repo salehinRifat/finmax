@@ -13,7 +13,11 @@ const router = Router()
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOAD_ROOT = path.resolve(__dirname, '..', process.env.UPLOAD_DIR || 'uploads')
 
-await fs.mkdir(UPLOAD_ROOT, { recursive: true })
+// Create upload root asynchronously but avoid top-level `await` so the
+// module can be required by environments that don't support top-level await.
+(async () => {
+  try { await fs.mkdir(UPLOAD_ROOT, { recursive: true }) } catch (err) { /* ignore */ }
+})()
 
 const ALLOWED_MIMETYPES = new Set([
   'application/pdf',
