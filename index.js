@@ -84,21 +84,25 @@ app.use(helmet({
 app.use(cors({ origin: allowedOrigins, credentials: true }))
 app.use(compression())
 
-const apiLimiter = rateLimit({
+// Tight bucket only on login + register to slow brute-force attempts.
+// General API traffic is intentionally NOT rate-limited so logged-in users
+// never see "too many requests" during normal use.
+const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later' },
+  message: { error: 'Too many login attempts, please try again later' },
 })
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 60,
   message: { error: 'Too many uploads, please try again later' },
 })
 
-app.use('/api', apiLimiter)
-app.post('/api/documents', uploadLimiter)
+app.use('/api/auth/login',    authLimiter)
+app.use('/api/auth/register', authLimiter)
+app.post('/api/documents',    uploadLimiter)
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
