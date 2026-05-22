@@ -89,7 +89,15 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
   frameguard: false,
 }))
-app.use(cors({ origin: allowedOrigins, credentials: true }))
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow non-browser requests (no Origin header) and matches from the allowlist
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true)
+    console.warn(`[cors] blocked origin: ${origin} (allowed: ${allowedOrigins.join(', ')})`)
+    cb(new Error('Not allowed by CORS'))
+  },
+  credentials: true,
+}))
 app.use(compression())
 
 // Tight bucket only on login + register to slow brute-force attempts.
