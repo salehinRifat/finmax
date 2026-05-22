@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { pool, query, queryOne } from '../lib/db.js'
 import { requireAuth, requireAdmin } from '../middleware/auth.js'
 import { copyDefaultItemsToUser } from '../lib/seed.js'
-import { sendApprovalEmail, sendFilingProgressEmail, sendAdminMessageEmail } from '../lib/email.js'
+import { sendApprovalEmail, sendFilingProgressEmail, sendAdminMessageEmail, debugSmtp } from '../lib/email.js'
 import { generateProfilePdf } from '../lib/profilePdf.js'
 
 const router = Router()
@@ -208,6 +208,15 @@ router.post('/:id/email', requireAdmin, async (req, res) => {
   })
 
   res.json({ success: true, queued_to: profile.email })
+})
+
+// TEMPORARY — diagnostic endpoint to surface SMTP errors directly.
+// Remove once the mail issue is solved.
+router.post('/debug/test-mail', requireAdmin, async (req, res) => {
+  const to = (req.body?.to || '').trim()
+  if (!to) return res.status(400).json({ error: 'to is required' })
+  const result = await debugSmtp(to)
+  res.status(result.ok ? 200 : 500).json(result)
 })
 
 export default router
