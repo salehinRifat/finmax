@@ -11,7 +11,12 @@ import { signDownloadToken, verifyToken } from '../lib/auth.js'
 const router = Router()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const UPLOAD_ROOT = path.resolve(__dirname, '..', process.env.UPLOAD_DIR || 'uploads')
+let UPLOAD_ROOT
+if (typeof path.resolve === 'function') {
+  UPLOAD_ROOT = path.resolve(__dirname, '..', process.env.UPLOAD_DIR || 'uploads')
+} else {
+  UPLOAD_ROOT = fileURLToPath(new URL(`../${process.env.UPLOAD_DIR || 'uploads'}`, import.meta.url))
+}
 
 // Ensure upload root exists without using top-level await.
 (async () => {
@@ -112,8 +117,9 @@ router.post('/', requireAuth, upload.single('file'), async (req, res) => {
     if (req.file) {
       const rawExt = req.file.originalname.split('.').pop()?.toLowerCase()
       const ext    = ALLOWED_EXTENSIONS.has(rawExt) ? rawExt : 'bin'
-      attachmentPath = path.posix.join('messages', ctx.userId, `${Date.now()}.${ext}`)
-      const absPath  = path.join(UPLOAD_ROOT, 'messages', ctx.userId, `${Date.now()}.${ext}`)
+      const ts     = Date.now()
+      attachmentPath = path.posix.join('messages', ctx.userId, `${ts}.${ext}`)
+      const absPath  = path.join(UPLOAD_ROOT, 'messages', ctx.userId, `${ts}.${ext}`)
       await fs.mkdir(path.dirname(absPath), { recursive: true })
       await fs.writeFile(absPath, req.file.buffer)
       attachmentName = req.file.originalname
