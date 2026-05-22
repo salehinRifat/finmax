@@ -29,14 +29,29 @@ const PORT       = process.env.PORT || 5000
 
 // CLIENT_URL may be a comma-separated list to allow multiple origins
 // (e.g. apex + www subdomain, or prod + a dev tunnel).
-const prodOrigins = (process.env.CLIENT_URL || '')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean)
+// Normalize: strip trailing slashes, and for each origin auto-add the www/no-www sibling
+function normalizeOrigins(list) {
+  const out = new Set()
+  for (const raw of list) {
+    if (!raw) continue
+    const cleaned = raw.trim().replace(/\/+$/, '')
+    if (!cleaned) continue
+    out.add(cleaned)
+    try {
+      const u = new URL(cleaned)
+      const altHost = u.host.startsWith('www.') ? u.host.slice(4) : `www.${u.host}`
+      out.add(`${u.protocol}//${altHost}`)
+    } catch { /* not a URL, skip alt */ }
+  }
+  return [...out]
+}
+
+const prodOrigins = normalizeOrigins((process.env.CLIENT_URL || '').split(','))
 const devOrigins  = process.env.NODE_ENV !== 'production'
   ? ['http://localhost:3000','http://localhost:3001','http://localhost:3002','http://localhost:5173','http://localhost:5174']
   : []
 const allowedOrigins = [...prodOrigins, ...devOrigins]
+console.log(`[cors] allowed origins: ${allowedOrigins.join(', ')}`)
 
 // ── Socket.io ──────────────────────────────────────────────────────────────────
 const io = new Server(httpServer, {
