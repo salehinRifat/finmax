@@ -24,7 +24,12 @@ const app        = express()
 const httpServer = http.createServer(app)
 const PORT       = process.env.PORT || 5000
 
-const prodOrigins = process.env.CLIENT_URL ? [process.env.CLIENT_URL] : []
+// CLIENT_URL may be a comma-separated list to allow multiple origins
+// (e.g. apex + www subdomain, or prod + a dev tunnel).
+const prodOrigins = (process.env.CLIENT_URL || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
 const devOrigins  = process.env.NODE_ENV !== 'production'
   ? ['http://localhost:3000','http://localhost:3001','http://localhost:3002','http://localhost:5173','http://localhost:5174']
   : []
@@ -89,20 +94,14 @@ app.use(compression())
 // never see "too many requests" during normal use.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 60,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many login attempts, please try again later' },
 })
-const uploadLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 60,
-  message: { error: 'Too many uploads, please try again later' },
-})
 
 app.use('/api/auth/login',    authLimiter)
 app.use('/api/auth/register', authLimiter)
-app.post('/api/documents',    uploadLimiter)
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
