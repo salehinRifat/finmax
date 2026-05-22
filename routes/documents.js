@@ -15,9 +15,9 @@ let UPLOAD_ROOT
 if (typeof path.resolve === 'function') {
   UPLOAD_ROOT = path.resolve(__dirname, '..', process.env.UPLOAD_DIR || 'uploads')
 } else {
-  // Fallback for environments where `path.resolve` is not available.
   UPLOAD_ROOT = fileURLToPath(new URL(`../${process.env.UPLOAD_DIR || 'uploads'}`, import.meta.url))
 }
+console.log(`[documents] UPLOAD_ROOT = ${UPLOAD_ROOT} (UPLOAD_DIR env = ${process.env.UPLOAD_DIR || '<unset>'})`)
 
 // Create upload root asynchronously but avoid top-level `await` so the
 // module can be required by environments that don't support top-level await.
