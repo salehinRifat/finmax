@@ -168,4 +168,4 @@ process.on('uncaughtException', (err) => {
   console.error('[uncaught]', err?.code || err?.message || err)
 })
 
-httpServer.listen(PORT, () => console.log(`TaxPro backend running on http://localhost:${PORT}`))
+httpServer.listen(PORT)
