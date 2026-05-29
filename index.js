@@ -97,19 +97,21 @@ io.on('connection', (socket) => {
 app.set('io', io)
 
 // ── Express middleware ─────────────────────────────────────────────────────────
-// Helmet — strict CSP + frameguard.
+// Helmet — strict CSP. No `frameguard` because X-Frame-Options can only say
+// "SAMEORIGIN" or "DENY", and we need to let the React app (different host,
+// e.g. finmaxservices.com → api.finmaxservices.com) embed our PDF/download
+// responses in <iframe>s. Modern browsers honour `frame-ancestors` below.
 //
 // The backend mostly serves JSON and binary streams (PDFs, file downloads),
 // which CSP doesn't constrain. The directives below kick in for any HTML the
 // backend renders (e.g. an unexpected error page) and serve as defense-in-depth.
-// The React app lives on a different origin (Hostinger static) and has its own
-// meta-CSP in frontend/index.html.
 //
-// CORP stays "cross-origin" so the frontend (different host) can still embed
-// PDFs and attachments served from /api/documents and /api/messages routes
-// as <iframe>/<img>. COEP stays off — enabling it would require every embedded
-// resource to opt in via its own CORP header, which would break third-party
-// content with no security benefit for our setup.
+// CORP stays "cross-origin" so the frontend can still embed PDFs and
+// attachments served from /api/documents, /api/messages, /api/profile-files
+// as <iframe>/<img>. COEP stays off — enabling it would require every
+// embedded resource to opt in via its own CORP header, which would break
+// third-party content with no security benefit for our setup.
+const frameAncestors = allowedOrigins.length > 0 ? ["'self'", ...allowedOrigins] : ["'self'"]
 app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: true,
@@ -120,16 +122,16 @@ app.use(helmet({
       'img-src':                  ["'self'", 'data:'],
       'object-src':               ["'none'"],
       'base-uri':                 ["'self'"],
-      // Modern clickjacking protection — supersedes X-Frame-Options where the
-      // browser understands it. We still set frameguard below for legacy clients.
-      'frame-ancestors':          ["'self'"],
+      // Only our configured frontend origins (CLIENT_URL allowlist) may
+      // <iframe> our endpoints. Prevents clickjacking from arbitrary sites.
+      'frame-ancestors':          frameAncestors,
       'form-action':              ["'self'"],
       'upgrade-insecure-requests': [],
     },
   },
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   crossOriginEmbedderPolicy: false,
-  frameguard: { action: 'sameorigin' },
+  frameguard: false,
 }))
 app.use(cors({
   origin: (origin, cb) => {
