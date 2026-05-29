@@ -4,10 +4,21 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js'
 import { copyDefaultItemsToUser } from '../lib/seed.js'
 import { sendApprovalEmail, sendFilingProgressEmail, sendAdminMessageEmail } from '../lib/email.js'
 import { generateProfilePdf } from '../lib/profilePdf.js'
+import { encryptSensitive, decryptProfile } from '../lib/crypto.js'
 
 const router = Router()
 
-const PROFILE_COLS = 'id, email, full_name, phone, address, city, state, zip_code, date_of_birth, ssn_last_four, sin_number, filing_status, role, is_approved, filing_progress, service_type, service_data, avatar_url, notes, created_at, updated_at'
+const PROFILE_COLS = 'id, email, alt_email, full_name, first_name, middle_name, last_name, phone, address, city, state, country, zip_code, date_of_birth, ssn_last_four, sin_number, filing_status, role, is_approved, filing_progress, service_type, service_data, avatar_url, notes, payment_status, created_at, updated_at'
+
+// payment_status is admin-only billing state — keep it out of any response
+// the client themselves can read (their own row via the self GET below).
+function stripAdminOnly(profile) {
+  if (!profile) return profile
+  const { payment_status, ...rest } = profile
+  return rest
+}
+
+const PAYMENT_STATUS_VALUES = new Set(['due', 'paid'])
 
 const FILING_PROGRESS_VALUES = new Set(['not_started', 'waiting_for_docs', 'in_progress', 'completed'])
 
@@ -18,7 +29,7 @@ router.get('/summary', requireAdmin, async (req, res) => {
     const rows = await query(`
       SELECT
         p.id, p.email, p.full_name, p.phone, p.role, p.is_approved,
-        p.filing_progress, p.service_type, p.created_at,
+        p.filing_progress, p.service_type, p.payment_status, p.created_at,
         (SELECT COUNT(*) FROM checklist_items ci WHERE ci.user_id = p.id) AS items_total,
         (SELECT COUNT(DISTINCT d.checklist_item_id) FROM documents d
             WHERE d.user_id = p.id AND d.checklist_item_id IS NOT NULL) AS items_done,
@@ -53,11 +64,18 @@ router.get('/', requireAuth, async (req, res) => {
       }
       sql += ` ORDER BY created_at DESC`
       const rows = await query(sql, params)
-      return res.json(rows.map(r => ({ ...r, is_approved: !!r.is_approved })))
+      return res.json(rows.map(r => {
+        decryptProfile(r)
+        return { ...r, is_approved: !!r.is_approved }
+      }))
     }
     const profile = await queryOne(`SELECT ${PROFILE_COLS} FROM profiles WHERE id = ?`, [req.user.id])
-    if (profile) profile.is_approved = !!profile.is_approved
-    res.json(profile)
+    if (profile) {
+      profile.is_approved = !!profile.is_approved
+      decryptProfile(profile)
+    }
+    // Self-read by a client must not leak admin-only fields.
+    res.json(profile && profile.role !== 'admin' ? stripAdminOnly(profile) : profile)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to fetch users' })
@@ -70,6 +88,7 @@ router.get('/:id', requireAdmin, async (req, res) => {
     const profile = await queryOne(`SELECT ${PROFILE_COLS} FROM profiles WHERE id = ?`, [req.params.id])
     if (!profile) return res.status(404).json({ error: 'User not found' })
     profile.is_approved = !!profile.is_approved
+    decryptProfile(profile)
     res.json(profile)
   } catch (err) {
     console.error(err)
@@ -83,8 +102,29 @@ router.patch('/:id', requireAuth, async (req, res) => {
   const isAdmin = req.profile?.role === 'admin'
   if (!isOwn && !isAdmin) return res.status(403).json({ error: 'Forbidden' })
 
-  const allowed = ['full_name', 'phone', 'address', 'city', 'state', 'zip_code', 'date_of_birth', 'ssn_last_four', 'sin_number', 'filing_status', 'service_type', 'service_data']
-  if (isAdmin) allowed.push('notes', 'is_approved', 'filing_progress')
+  const allowed = ['full_name', 'first_name', 'middle_name', 'last_name', 'alt_email', 'phone', 'address', 'city', 'state', 'country', 'zip_code', 'date_of_birth', 'ssn_last_four', 'sin_number', 'filing_status', 'service_type', 'service_data']
+  if (isAdmin) allowed.push('notes', 'is_approved', 'filing_progress', 'payment_status')
+
+  if ('payment_status' in req.body && req.body.payment_status !== null) {
+    if (!PAYMENT_STATUS_VALUES.has(req.body.payment_status)) {
+      return res.status(400).json({ error: 'Invalid payment_status' })
+    }
+  }
+
+  // Whenever any name part is updated, recompute full_name from the merged
+  // first/middle/last so display copy (emails, PDFs, navbar greeting) stays
+  // in sync without each caller having to remember.
+  const nameKeys = ['first_name', 'middle_name', 'last_name']
+  const touchedName = nameKeys.some(k => k in req.body)
+  if (touchedName) {
+    const existing = await queryOne(
+      `SELECT first_name, middle_name, last_name FROM profiles WHERE id = ?`,
+      [req.params.id]
+    ) || {}
+    const merged = nameKeys.map(k => (k in req.body ? req.body[k] : existing[k]) || '').map(s => String(s).trim())
+    const computed = merged.filter(Boolean).join(' ')
+    if (computed) req.body.full_name = computed
+  }
 
   // service_type must reference an existing form definition (built-in or custom)
   if ('service_type' in req.body && req.body.service_type !== null) {
@@ -103,6 +143,11 @@ router.patch('/:id', requireAuth, async (req, res) => {
       }
       if (k === 'service_data' && v !== null && typeof v === 'object') {
         v = JSON.stringify(v)
+      }
+      // Encrypt sensitive fields before they hit the database. The plaintext
+      // value never persists to disk, MySQL logs, or backups.
+      if (k === 'sin_number' && v !== null && v !== '') {
+        v = encryptSensitive(String(v).trim())
       }
       cols.push(`${k} = ?`)
       vals.push(v === '' ? null : v)
@@ -134,7 +179,10 @@ router.patch('/:id', requireAuth, async (req, res) => {
     }
 
     const profile = await queryOne(`SELECT ${PROFILE_COLS} FROM profiles WHERE id = ?`, [req.params.id])
-    if (profile) profile.is_approved = !!profile.is_approved
+    if (profile) {
+      profile.is_approved = !!profile.is_approved
+      decryptProfile(profile)
+    }
 
     // Fire-and-forget emails (run after the response is committed to disk).
     if (triggerApproval && profile?.email) {
@@ -148,7 +196,8 @@ router.patch('/:id', requireAuth, async (req, res) => {
       })
     }
 
-    res.json(profile)
+    // Non-admin self-update must not leak admin-only fields in the response.
+    res.json(profile && !isAdmin ? stripAdminOnly(profile) : profile)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to update profile' })
@@ -162,10 +211,16 @@ router.get('/:id/profile-pdf', requireAdmin, async (req, res) => {
 
   // Boolean coercion for is_approved (tinyint comes back as 0/1)
   profile.is_approved = !!profile.is_approved
+  decryptProfile(profile)
 
-  // Fetch the matching form definition so we can render labels for service_data
+  // Fetch the matching form definition so we can render labels for service_data.
+  // is_builtin is required so the PDF renderer knows whether to:
+  //   • label the fields block as "Additional Questions" (built-in form)
+  //   • or "<Form Label> Details" (admin-created custom form)
+  // …and so it can filter out the seeded built-in fields that the hardcoded
+  // service blocks already render above.
   const formDef = await queryOne(
-    `SELECT form_key, label FROM form_definitions WHERE form_key = ?`,
+    `SELECT form_key, label, is_builtin FROM form_definitions WHERE form_key = ?`,
     [profile.service_type]
   )
   let form = null
@@ -177,6 +232,7 @@ router.get('/:id/profile-pdf', requireAdmin, async (req, res) => {
     )
     form = {
       ...formDef,
+      is_builtin: !!formDef.is_builtin,
       fields: fields.map(f => ({
         ...f,
         field_options: typeof f.field_options === 'string' ? JSON.parse(f.field_options) : f.field_options,

@@ -131,6 +131,13 @@ router.post('/:formKey/fields', requireAdmin, async (req, res) => {
 
 // PATCH /api/forms/fields/:id  — admin only, edit a field
 router.patch('/fields/:id', requireAdmin, async (req, res) => {
+  // Seeded built-in fields back the hardcoded profile sections — letting an
+  // admin rename/retype them here would silently break the rendering, so we
+  // lock them down at the API boundary.
+  const existing = await queryOne(`SELECT is_builtin FROM form_fields WHERE id = ?`, [req.params.id])
+  if (!existing) return res.status(404).json({ error: 'Field not found' })
+  if (existing.is_builtin) return res.status(400).json({ error: 'Built-in fields cannot be edited' })
+
   const allowed = ['field_label', 'field_type', 'field_options', 'required', 'order_index']
   const cols = []
   const vals = []
@@ -154,8 +161,11 @@ router.patch('/fields/:id', requireAdmin, async (req, res) => {
   }
 })
 
-// DELETE /api/forms/fields/:id  — admin only
+// DELETE /api/forms/fields/:id  — admin only, built-in fields are locked
 router.delete('/fields/:id', requireAdmin, async (req, res) => {
+  const existing = await queryOne(`SELECT is_builtin FROM form_fields WHERE id = ?`, [req.params.id])
+  if (!existing) return res.status(404).json({ error: 'Field not found' })
+  if (existing.is_builtin) return res.status(400).json({ error: 'Built-in fields cannot be deleted' })
   try {
     await pool.execute(`DELETE FROM form_fields WHERE id = ?`, [req.params.id])
     res.json({ success: true })

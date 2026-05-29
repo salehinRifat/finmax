@@ -10,11 +10,13 @@ import { verifyToken } from './lib/auth.js'
 import { queryOne }    from './lib/db.js'
 import { ensureGeneralCategory } from './lib/seed.js'
 import { ensureBuiltinForms } from './lib/formSeed.js'
+import { applyMigrations } from './lib/migrations.js'
 import { verifyEmailConfig } from './lib/email.js'
 import authRouter          from './routes/auth.js'
 import usersRouter         from './routes/users.js'
 import checklistRouter     from './routes/checklists.js'
 import documentsRouter     from './routes/documents.js'
+import profileFilesRouter  from './routes/profileFiles.js'
 import categoriesRouter    from './routes/categories.js'
 import notificationsRouter from './routes/notifications.js'
 import messagesRouter      from './routes/messages.js'
@@ -95,13 +97,39 @@ io.on('connection', (socket) => {
 app.set('io', io)
 
 // ── Express middleware ─────────────────────────────────────────────────────────
-// Loosen CORP/CSP so the frontend (different port in dev) can embed PDFs and
-// images served from the documents/messages download routes in iframes/<img>.
+// Helmet — strict CSP + frameguard.
+//
+// The backend mostly serves JSON and binary streams (PDFs, file downloads),
+// which CSP doesn't constrain. The directives below kick in for any HTML the
+// backend renders (e.g. an unexpected error page) and serve as defense-in-depth.
+// The React app lives on a different origin (Hostinger static) and has its own
+// meta-CSP in frontend/index.html.
+//
+// CORP stays "cross-origin" so the frontend (different host) can still embed
+// PDFs and attachments served from /api/documents and /api/messages routes
+// as <iframe>/<img>. COEP stays off — enabling it would require every embedded
+// resource to opt in via its own CORP header, which would break third-party
+// content with no security benefit for our setup.
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      'default-src':              ["'self'"],
+      'script-src':               ["'self'"],
+      'style-src':                ["'self'"],
+      'img-src':                  ["'self'", 'data:'],
+      'object-src':               ["'none'"],
+      'base-uri':                 ["'self'"],
+      // Modern clickjacking protection — supersedes X-Frame-Options where the
+      // browser understands it. We still set frameguard below for legacy clients.
+      'frame-ancestors':          ["'self'"],
+      'form-action':              ["'self'"],
+      'upgrade-insecure-requests': [],
+    },
+  },
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   crossOriginEmbedderPolicy: false,
-  frameguard: false,
+  frameguard: { action: 'sameorigin' },
 }))
 app.use(cors({
   origin: (origin, cb) => {
@@ -127,6 +155,12 @@ const authLimiter = rateLimit({
 
 app.use('/api/auth/login',    authLimiter)
 app.use('/api/auth/register', authLimiter)
+// Same tight bucket guards OTP issuance / verification so an attacker can't
+// brute-force codes or spam the inbox.
+app.use('/api/auth/login/verify-2fa',        authLimiter)
+app.use('/api/auth/login/resend-2fa',        authLimiter)
+app.use('/api/auth/password-reset/request',  authLimiter)
+app.use('/api/auth/password-reset/verify',   authLimiter)
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
@@ -135,6 +169,7 @@ app.use('/api/auth',          authRouter)
 app.use('/api/users',         usersRouter)
 app.use('/api/checklists',    checklistRouter)
 app.use('/api/documents',     documentsRouter)
+app.use('/api/profile-files', profileFilesRouter)
 app.use('/api/categories',    categoriesRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/messages',      messagesRouter)
@@ -152,7 +187,8 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' })
 })
 
-// One-time / idempotent seeds.
+// One-time / idempotent seeds + migrations.
+applyMigrations().catch(err => console.error('Migration failed:', err))
 ensureGeneralCategory().catch(err => console.error('General seed failed:', err))
 ensureBuiltinForms().catch(err => console.error('Form seed failed:', err))
 
