@@ -141,6 +141,9 @@ app.use(cors({
     cb(new Error('Not allowed by CORS'))
   },
   credentials: true,
+  // Expose Content-Disposition so the browser/frontend can read the
+  // server-set download filename on cross-origin responses (e.g. profile PDF).
+  exposedHeaders: ['Content-Disposition'],
 }))
 app.use(compression())
 
