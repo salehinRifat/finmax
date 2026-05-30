@@ -23,17 +23,16 @@ if (typeof path.resolve === 'function') {
   try { await fs.mkdir(UPLOAD_ROOT, { recursive: true }) } catch (err) { /* ignore */ }
 })()
 
+// Chat attachments are restricted to images only. Documents (PDF/doc) belong
+// in the checklist upload flow, not the message thread.
 const ALLOWED_MIMETYPES = new Set([
-  'application/pdf',
   'image/jpeg',
   'image/png',
   'image/gif',
   'image/webp',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ])
 
-const ALLOWED_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'doc', 'docx'])
+const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp'])
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const isUuid = (s) => typeof s === 'string' && UUID_RE.test(s)

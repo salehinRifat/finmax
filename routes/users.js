@@ -242,9 +242,22 @@ router.get('/:id/profile-pdf', requireAdmin, async (req, res) => {
     }
   }
 
-  const filename = `${(profile.full_name || profile.email || 'client').replace(/[^a-zA-Z0-9_-]+/g, '_')}-profile.pdf`
+  // Download as "<Client Name>.pdf". Keep the human-readable name (spaces and
+  // all); only strip characters that are illegal in filenames.
+  const clientName = (profile.full_name
+    || [profile.first_name, profile.last_name].filter(Boolean).join(' ')
+    || profile.email
+    || 'client').trim()
+  const safeName = clientName.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim() || 'client'
+  // ASCII-only fallback for the legacy `filename` param (older clients can't
+  // handle non-ASCII), plus an RFC 5987 `filename*` so UTF-8 names (e.g. Bangla)
+  // survive intact in modern browsers.
+  const asciiName = safeName.replace(/[^\x20-\x7E]/g, '_')
   res.setHeader('Content-Type', 'application/pdf')
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="${asciiName}.pdf"; filename*=UTF-8''${encodeURIComponent(safeName)}.pdf`
+  )
   generateProfilePdf({ profile, form }).pipe(res)
 })
 

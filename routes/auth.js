@@ -238,10 +238,13 @@ router.post('/password-reset/request', async (req, res) => {
     if (!email) return res.status(400).json({ error: 'Email is required' })
 
     const profile = await queryOne(
-      `SELECT id, email, full_name FROM profiles WHERE email = ?`,
+      `SELECT id, email, full_name, role FROM profiles WHERE email = ?`,
       [String(email).toLowerCase()]
     )
-    if (profile) {
+    // Self-service password reset is disabled for admin accounts — they must
+    // not be resettable from a (potentially compromised) inbox. We still
+    // return the neutral message so the email's role isn't revealed.
+    if (profile && profile.role !== 'admin') {
       const code = await issueOtp(profile.id, 'password_reset')
       sendPasswordResetEmail({ to: profile.email, fullName: profile.full_name, code })
     }
@@ -267,11 +270,14 @@ router.post('/password-reset/verify', async (req, res) => {
     }
 
     const profile = await queryOne(
-      `SELECT id FROM profiles WHERE email = ?`,
+      `SELECT id, role FROM profiles WHERE email = ?`,
       [String(email).toLowerCase()]
     )
-    // Constant-ish response so attackers can't tell "no such user" from "bad code".
-    if (!profile) return res.status(400).json({ error: 'Invalid or expired reset code' })
+    // Constant-ish response so attackers can't tell "no such user", "admin
+    // account", or "bad code" apart. Admin accounts can't be reset here.
+    if (!profile || profile.role === 'admin') {
+      return res.status(400).json({ error: 'Invalid or expired reset code' })
+    }
 
     const otp = await findActiveOtp(profile.id, 'password_reset')
     if (!otp) return res.status(400).json({ error: 'Invalid or expired reset code' })
