@@ -242,22 +242,20 @@ router.get('/:id/profile-pdf', requireAdmin, async (req, res) => {
     }
   }
 
-  // Download as "<Client Name>.pdf". Keep the human-readable name (spaces and
-  // all); only strip characters that are illegal in filenames.
+  // Download as "<client_name>.pdf" — lowercased, spaces/illegal chars turned
+  // into underscores (e.g. "Abu Salehin Rifat" -> "abu_salehin_rifat.pdf").
   const clientName = (profile.full_name
     || [profile.first_name, profile.last_name].filter(Boolean).join(' ')
     || profile.email
     || 'client').trim()
-  const safeName = clientName.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim() || 'client'
-  // ASCII-only fallback for the legacy `filename` param (older clients can't
-  // handle non-ASCII), plus an RFC 5987 `filename*` so UTF-8 names (e.g. Bangla)
-  // survive intact in modern browsers.
-  const asciiName = safeName.replace(/[^\x20-\x7E]/g, '_')
+  const safeName = clientName
+    .toLowerCase()
+    .replace(/[\\/:*?"<>|]/g, '')   // drop illegal filename chars
+    .replace(/[^a-z0-9]+/g, '_')    // collapse spaces & other separators to _
+    .replace(/^_+|_+$/g, '')        // trim leading/trailing underscores
+    || 'client'
   res.setHeader('Content-Type', 'application/pdf')
-  res.setHeader(
-    'Content-Disposition',
-    `attachment; filename="${asciiName}.pdf"; filename*=UTF-8''${encodeURIComponent(safeName)}.pdf`
-  )
+  res.setHeader('Content-Disposition', `attachment; filename="${safeName}.pdf"`)
   generateProfilePdf({ profile, form }).pipe(res)
 })
 
